@@ -169,17 +169,28 @@ namespace Ncp
         public void RefreshDisplays()
         {
             if(backend==null) throw new InvalidOperationException("NVIDIA 연결을 사용할 수 없습니다.");
-            string old=Selected==null?Data.SelectedDisplay:Selected.Key;
+            string old=Data.SelectedDisplay;
             Displays=backend.Enumerate();
-            Selected=Displays.FirstOrDefault(d=>d.Key==old) ?? Displays.FirstOrDefault();
+            Selected=Displays.FirstOrDefault(d=>string.Equals(d.Key,old,StringComparison.OrdinalIgnoreCase))
+                ?? Displays.FirstOrDefault(d=>Selected!=null && string.Equals(d.Key,Selected.Key,StringComparison.OrdinalIgnoreCase))
+                ?? Displays.FirstOrDefault();
             Reading=null;
-            if(Selected!=null) Refresh();
+            if(Selected!=null) {
+                // Remember the initial choice too; keep an absent user's preference
+                // so reconnecting it restores the intended monitor automatically.
+                if(CanSave && string.IsNullOrEmpty(Data.SelectedDisplay)) {Data.SelectedDisplay=Selected.Key;Persist();}
+                Refresh();
+            }
         }
         public void Select(DisplayTarget display)
         {
-            Selected=display; Reading=null; Refresh();
-            Data.SelectedDisplay=display.Key;
-            if(CanSave) Persist();
+            var resolved=display==null?null:Displays.FirstOrDefault(d=>string.Equals(d.Key,display.Key,StringComparison.OrdinalIgnoreCase));
+            if(resolved==null)throw new InvalidOperationException("선택한 모니터의 연결이 변경되었습니다. 새로고침하세요.");
+            Selected=resolved; Reading=null;
+            string previous=Data.SelectedDisplay;Data.SelectedDisplay=resolved.Key;
+            if(CanSave)try {Persist();}catch {Data.SelectedDisplay=previous;throw;}
+            // A color-query failure must not discard a successful explicit selection.
+            Refresh();
         }
         public void Refresh()
         {

@@ -64,12 +64,7 @@ namespace Ncp
         }
         static string DeviceKey(DisplayTarget display)
         {
-            for(uint i=0;i<32;i++) {
-                var device=new Device {Size=Marshal.SizeOf(typeof(Device))};
-                if(!EnumDisplayDevices(display.GdiName,i,ref device,1))break;
-                if(string.Equals(device.Id,display.Key,StringComparison.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(device.Key))return device.Key;
-            }
-            throw new InvalidOperationException("ICC를 적용할 모니터의 연결이 변경되었습니다. 새로고침하세요.");
+            return WindowsDisplayIdentity.ResolveKey(display);
         }
         static string DefaultName(string key,int scope)
         {
@@ -98,18 +93,42 @@ namespace Ncp
         }
         sealed class NativeAssociations:IIccAssociations
         {
+            readonly IccUserProfileSetting userProfiles=new IccUserProfileSetting(new NativeUserProfileAccess());
             public IccState Read(DisplayTarget display) {
-                string key=DeviceKey(display);bool perUser;
-                Check(WcsGetUsePerUserProfiles(key,MonitorClass,out perUser),"Windows ICC 설정 조회");
+                string key=DeviceKey(display);bool perUser=userProfiles.Read(key);
                 var state=new IccState {PerUser=perUser,ProfileName=DefaultName(key,perUser?CurrentUser:SystemWide),Profiles=ProfileNames(key,CurrentUser)};
                 state.Validate();return state;
             }
-            public void UsePerUser(DisplayTarget display,bool enabled) {Check(WcsSetUsePerUserProfiles(DeviceKey(display),MonitorClass,enabled),"사용자 ICC 설정 변경");}
+            public void UsePerUser(DisplayTarget display,bool enabled) {userProfiles.Set(DeviceKey(display),enabled);}
             public void Associate(DisplayTarget display,string name) {Check(WcsAssociateColorProfileWithDevice(CurrentUser,name,DeviceKey(display)),"ICC 모니터 연결");}
             public void SetDefault(DisplayTarget display,string name) {Check(WcsSetDefaultColorProfile(CurrentUser,DeviceKey(display),IccType,NoSubtype,0,name),"기본 ICC 적용");}
             public void Remove(DisplayTarget display,string name) {Check(WcsDisassociateColorProfileFromDevice(CurrentUser,name,DeviceKey(display)),"이전 NCP ICC 연결 해제");}
         }
+        sealed class NativeUserProfileAccess:IIccUserProfileAccess
+        {
+            public bool ReadNative(string key) {bool enabled;Check(WcsGetUsePerUserProfiles(key,MonitorClass,out enabled),"Windows ICC 설정 조회");return enabled;}
+            public void WriteNative(string key,bool enabled) {Check(WcsSetUsePerUserProfiles(key,MonitorClass,enabled),"사용자 ICC 설정 변경");}
+            public bool? ReadStored(string path) {
+                using(var key=Registry.CurrentUser.OpenSubKey(path)) {
+                    if(key==null)return null;
+                    object value=key.GetValue("UsePerUserProfiles",null,RegistryValueOptions.DoNotExpandEnvironmentNames);
+                    if(value==null)return null;
+                    if(!(value is int) || ((int)value!=0 && (int)value!=1))throw new InvalidDataException("사용자별 ICC 설정 값이 올바르지 않습니다.");
+                    return (int)value==1;
+                }
+            }
+            public void WriteStored(string path,bool enabled) {
+                using(var key=Registry.CurrentUser.CreateSubKey(path))key.SetValue("UsePerUserProfiles",enabled?1:0,RegistryValueKind.DWord);
+            }
+        }
         public IccState Read(DisplayTarget display) {return associations.Read(display);}
+        internal static string DescribeTarget(DisplayTarget display)
+        {
+            string key=DeviceKey(display);var native=new NativeUserProfileAccess();
+            string path=IccUserProfileSetting.StoredPath(key);bool? stored=path==null?null:native.ReadStored(path);
+            return "ICC device key: "+key+"\nPer-user API: "+native.ReadNative(key)+
+                "\nPer-user stored: "+(stored.HasValue?stored.Value.ToString():"not set");
+        }
         public static bool IsNcpProfile(string name)
         {
             return IccLibrary.IsBackupName(name);

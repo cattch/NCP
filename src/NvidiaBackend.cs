@@ -117,11 +117,10 @@ namespace Ncp
                 string nv=dd.Name.StartsWith(@"\\.\",StringComparison.Ordinal)?@"\\"+dd.Name.Substring(4):dd.Name;
                 if(getHandle(dd.Name,out handle)!=0 && getHandle(nv,out handle)!=0) continue;
                 if(getId(dd.Name,out id)!=0 && getId(nv,out id)!=0) continue;
-                var mon=new DisplayDevice { Size=Marshal.SizeOf(typeof(DisplayDevice)) };
-                bool found=EnumDisplayDevices(dd.Name,0,ref mon,1);
-                // Use the monitor device interface identity, never only DISPLAY1 or the transient NVAPI handle.
-                if(!found || string.IsNullOrWhiteSpace(mon.Id)) continue;
-                list.Add(new DisplayTarget { GdiName=dd.Name,Name=mon.Description,Key=mon.Id,
+                var mon=WindowsDisplayIdentity.FindActive(WindowsDisplayIdentity.Enumerate(dd.Name));
+                // A remembered inactive child may precede the actual connected monitor.
+                if(mon==null)continue;
+                list.Add(new DisplayTarget { GdiName=dd.Name,Name=mon.Description,Key=mon.InterfaceId,
                     Id=id,Handle=handle,Primary=(dd.Flags&4)!=0 });
             }
             return list.OrderByDescending(d=>d.Primary).ToList();

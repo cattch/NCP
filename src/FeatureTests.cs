@@ -21,6 +21,7 @@ namespace Ncp
         {
             string root=Path.Combine(directory,"icc-and-profiles");Directory.CreateDirectory(root);
             VerifyAssociations(check,reject,root);
+            DisplayRegressionTests.Run(check,reject,root);
             VerifyBackupCleanup(check,reject,root);
             VerifyBundledProfile(check,reject,root);
             VerifyInitialProfileAddition(check,reject,root);

@@ -22,7 +22,11 @@ namespace Ncp
                             if(r.PanelReadIssue!=null)log.AppendLine(r.PanelReadIssue);
                             if(r.PanelValues!=null)log.AppendLine("Panel saved B/C/G="+r.PanelValues.Brightness+"/"+r.PanelValues.Contrast+"/"+r.PanelValues.Gamma);
                             log.AppendLine("Live gamma readback: unsupported. Setters: resolved, not invoked.");
-                            try {var icc=new WindowsIccBackend().Read(d);log.AppendLine("Windows ICC: "+icc.Fingerprint);}catch(Exception e) {log.AppendLine("Windows ICC read: "+e.Message);}
+                            try {
+                                var icc=new WindowsIccBackend().Read(d);log.AppendLine("Windows ICC: "+icc.Fingerprint);
+                                log.AppendLine("Associated ICCs: "+string.Join(", ",icc.Profiles??new System.Collections.Generic.List<string>()));
+                                log.AppendLine(WindowsIccBackend.DescribeTarget(d));
+                            }catch(Exception e) {log.AppendLine("Windows ICC read: "+e.Message);}
                         } catch(Exception e) {code=1;log.AppendLine(e.ToString());}
                     }
                     if(displays.Count==0)code=1;

@@ -60,21 +60,24 @@ namespace Ncp
         {
             new IccState {ProfileName=name}.Validate();
             if(name==null)throw new InvalidDataException("적용할 ICC 파일이 없습니다.");
-            api.UsePerUser(display,true);
+            if(!api.Read(display).PerUser)api.UsePerUser(display,true);
             if(!(api.Read(display).Profiles??new List<string>()).Contains(name,StringComparer.OrdinalIgnoreCase))api.Associate(display,name);
-            api.SetDefault(display,name);
             RemoveManaged(display,managed,name);
+            // Removing a previous association can change Windows' default choice.
+            // Make the requested choice final, after all list edits have completed.
+            api.SetDefault(display,name);
             var actual=api.Read(display);
             if(!actual.PerUser || !string.Equals(actual.ProfileName,name,StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Windows ICC 적용 결과가 일치하지 않습니다.");
+                throw new InvalidOperationException("Windows ICC 적용 결과가 일치하지 않습니다.\n대상: "+display.GdiName+
+                    "\n사용자별 설정: "+(actual.PerUser?"켜짐":"꺼짐")+"\n요청 ICC: "+name+"\n조회 ICC: "+(actual.ProfileName??"없음"));
         }
         internal void Restore(DisplayTarget display,IccState original,IEnumerable<string> managed,bool exact=false)
         {
             original.Validate();
             if(!exact)original=WithoutNcp(original);
-            api.UsePerUser(display,true);
+            if(!api.Read(display).PerUser)api.UsePerUser(display,true);
             RemoveManaged(display,managed,original.ProfileName);
-            if(!original.PerUser)api.UsePerUser(display,false);
+            if(!original.PerUser && api.Read(display).PerUser)api.UsePerUser(display,false);
             else if(exact && original.ProfileName!=null) {
                 // A failed application must roll back to its precise previous selection.
                 // Normal restoration only removes NCP and lets Windows choose the original.
