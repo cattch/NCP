@@ -24,7 +24,10 @@ namespace Ncp
         const uint MonitorClass=0x6d6e7472;
         const int CurrentUser=1,SystemWide=0,IccType=0,NoSubtype=4;
         readonly IIccAssociations associations;
-        public WindowsIccBackend() {associations=new NativeAssociations();}
+        public WindowsIccBackend() {
+            associations=new NativeAssociations();
+            if(DisplayIccAssociations.Available)associations=new DisplayIccAssociations(associations);
+        }
         internal WindowsIccBackend(IIccAssociations associations) {this.associations=associations;}
         [DllImport("mscms.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool WcsGetUsePerUserProfiles(string device,uint deviceClass,out bool perUser);
         [DllImport("mscms.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool WcsSetUsePerUserProfiles(string device,uint deviceClass,bool perUser);
@@ -122,12 +125,21 @@ namespace Ncp
             }
         }
         public IccState Read(DisplayTarget display) {return associations.Read(display);}
+        internal static void SetPerUserNative(DisplayTarget display,bool enabled) {new NativeUserProfileAccess().WriteNative(DeviceKey(display),enabled);}
         internal static string DescribeTarget(DisplayTarget display)
         {
             string key=DeviceKey(display);var native=new NativeUserProfileAccess();
             string path=IccUserProfileSetting.StoredPath(key);bool? stored=path==null?null:native.ReadStored(path);
-            return "ICC device key: "+key+"\nPer-user API: "+native.ReadNative(key)+
-                "\nPer-user stored: "+(stored.HasValue?stored.Value.ToString():"not set");
+            var log=new StringBuilder();
+            log.AppendLine("ICC device key: "+key);log.AppendLine("Per-user API: "+native.ReadNative(key));
+            log.AppendLine("Per-user stored: "+(stored.HasValue?stored.Value.ToString():"not set"));
+            foreach(int scope in new[]{SystemWide,CurrentUser}) {
+                try {log.AppendLine("Legacy scope "+scope+" default: "+(DefaultName(key,scope)??"none"));
+                    log.AppendLine("Legacy scope "+scope+" profiles: "+string.Join(", ",ProfileNames(key,scope)));}
+                catch(Exception e) {log.AppendLine("Legacy scope "+scope+": "+e.Message);}
+            }
+            try {log.AppendLine(DisplayIccAssociations.Describe(display));}catch(Exception e) {log.AppendLine("Display ColorProfile read: "+e.Message);}
+            return log.ToString();
         }
         public static bool IsNcpProfile(string name)
         {
@@ -218,7 +230,14 @@ namespace Ncp
         }
         public void Apply(DisplayTarget display,string profileName,IEnumerable<string> managed)
         {
-            new IccAssociationPolicy(associations).Apply(display,profileName,managed);
+            try {new IccAssociationPolicy(associations).Apply(display,profileName,managed);}
+            catch(Exception e) {
+                Diagnostics.RecordIccFailure(display,profileName,e);
+                string mode=null;try {mode=WindowsDisplayPath.ColorMode(display);}catch { }
+                if(mode!=null && (mode.Contains("ACM") || mode=="HDR"))
+                    throw new InvalidOperationException(e.Message+"\n이 모니터의 Windows 자동 색 관리 또는 HDR가 켜져 있습니다.\n설정 → 시스템 → 디스플레이 → 색 프로필에서 ‘앱의 색 자동 관리’를 끄고 다시 적용하세요. HDR가 켜져 있다면 HDR도 확인하세요.",e);
+                throw;
+            }
         }
         public void Restore(DisplayTarget display,IccState state,IEnumerable<string> managed,bool exact=false)
         {

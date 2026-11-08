@@ -11,7 +11,7 @@ namespace Ncp
             var profile=Load(new IccLibrary(programDirectory));
             return new AppData {
                 Profiles=new List<PresetProfile>{profile},ActiveProfileId=profile.Id,
-                Presets=profile.Presets,PresetOrder=profile.Order
+                Presets=profile.Presets,PresetOrder=profile.Order,DefaultPresetRemoved=profile.DefaultPresetRemoved
             };
         }
         internal static PresetProfile Load(IccLibrary library)

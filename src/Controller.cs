@@ -27,25 +27,25 @@ namespace Ncp
             try { Data=store.Load(); }
             catch(Exception e) { Data=new AppData(); StorageError="설정 파일을 읽지 못했습니다. 원본 파일은 보존됩니다.\n"+store.FilePath+"\n"+e.Message; }
             if(Data.Profiles.Count==0) {
-                var profile=new PresetProfile {Id=Guid.NewGuid().ToString("N"),Name="기본 프로필",Presets=Data.Presets,Order=Data.PresetOrder};
+                var profile=new PresetProfile {Id=Guid.NewGuid().ToString("N"),Name="기본 프로필",Presets=Data.Presets,Order=Data.PresetOrder,DefaultPresetRemoved=Data.DefaultPresetRemoved};
                 Data.Profiles.Add(profile);Data.ActiveProfileId=profile.Id;
             } else {
                 var profile=Data.Profiles.FirstOrDefault(p=>p.Id==Data.ActiveProfileId)??Data.Profiles[0];
-                Data.ActiveProfileId=profile.Id;Data.Presets=profile.Presets;Data.PresetOrder=profile.Order;
+                Data.ActiveProfileId=profile.Id;Data.Presets=profile.Presets;Data.PresetOrder=profile.Order;Data.DefaultPresetRemoved=profile.DefaultPresetRemoved;
             }
         }
         public PresetProfile ActiveProfile {get {return Data.Profiles.First(p=>p.Id==Data.ActiveProfileId);}}
-        void SyncProfile() {ActiveProfile.Presets=Data.Presets;ActiveProfile.Order=Data.PresetOrder;}
+        void SyncProfile() {ActiveProfile.Presets=Data.Presets;ActiveProfile.Order=Data.PresetOrder;ActiveProfile.DefaultPresetRemoved=Data.DefaultPresetRemoved;}
         public void SwitchProfile(string id)
         {
             if(!CanSave)throw new IOException(StorageError);
             SyncProfile();var profile=Data.Profiles.FirstOrDefault(p=>p.Id==id);
             if(profile==null)throw new InvalidOperationException("프로필을 찾을 수 없습니다.");
-            Data.ActiveProfileId=profile.Id;Data.Presets=profile.Presets;Data.PresetOrder=profile.Order;Persist();
+            Data.ActiveProfileId=profile.Id;Data.Presets=profile.Presets;Data.PresetOrder=profile.Order;Data.DefaultPresetRemoved=profile.DefaultPresetRemoved;Persist();
         }
         public PresetProfile CreateProfile(string name,bool copyCurrent)
         {
-            return AddProfile(name,copyCurrent?Data.Presets:new List<Preset>(),copyCurrent?Data.PresetOrder:new List<string>());
+            return AddProfile(name,copyCurrent?Data.Presets:new List<Preset>(),copyCurrent?Data.PresetOrder:new List<string>(),copyCurrent && Data.DefaultPresetRemoved);
         }
         public void RenameProfile(string name)
         {
@@ -58,13 +58,13 @@ namespace Ncp
             string previous=profile.Name;profile.Name=name;
             try {Persist();}catch {profile.Name=previous;throw;}
         }
-        public PresetProfile AddProfile(string name,IEnumerable<Preset> presets,IEnumerable<string> order)
+        public PresetProfile AddProfile(string name,IEnumerable<Preset> presets,IEnumerable<string> order,bool defaultPresetRemoved=false)
         {
             if(!CanSave)throw new IOException(StorageError);
             if(Data.Profiles.Count>=50)throw new InvalidOperationException("프로필은 최대 50개까지 저장할 수 있습니다.");
             name=(name??"").Trim();
             if(Data.Profiles.Any(p=>string.Equals(p.Name,name,StringComparison.OrdinalIgnoreCase)))throw new InvalidOperationException("같은 이름의 프로필이 있습니다.");
-            var profile=new PresetProfile {Id=Guid.NewGuid().ToString("N"),Name=name};
+            var profile=new PresetProfile {Id=Guid.NewGuid().ToString("N"),Name=name,DefaultPresetRemoved=defaultPresetRemoved};
             var map=new Dictionary<string,string>{{"default","default"}};
             foreach(var p in presets) {
                 var clone=new Preset {Id=Guid.NewGuid().ToString("N"),Name=p.Name,Values=p.Values.Copy(),Icc=p.Icc};
@@ -72,14 +72,14 @@ namespace Ncp
                 map.Add(p.Id,clone.Id);profile.Presets.Add(clone);
             }
             profile.Order=order.Where(map.ContainsKey).Select(id=>map[id]).ToList();profile.Validate();
-            SyncProfile();Data.Profiles.Add(profile);Data.ActiveProfileId=profile.Id;Data.Presets=profile.Presets;Data.PresetOrder=profile.Order;Persist();return profile;
+            SyncProfile();Data.Profiles.Add(profile);Data.ActiveProfileId=profile.Id;Data.Presets=profile.Presets;Data.PresetOrder=profile.Order;Data.DefaultPresetRemoved=profile.DefaultPresetRemoved;Persist();return profile;
         }
         public void DeleteProfile()
         {
             if(!CanSave)throw new IOException(StorageError);
             if(Data.Profiles.Count<=1)throw new InvalidOperationException("마지막 프로필은 삭제할 수 없습니다.");
             Data.Profiles.RemoveAll(p=>p.Id==Data.ActiveProfileId);
-            var next=Data.Profiles[0];Data.ActiveProfileId=next.Id;Data.Presets=next.Presets;Data.PresetOrder=next.Order;Persist();
+            var next=Data.Profiles[0];Data.ActiveProfileId=next.Id;Data.Presets=next.Presets;Data.PresetOrder=next.Order;Data.DefaultPresetRemoved=next.DefaultPresetRemoved;Persist();
             CleanupIccBackups();
         }
         public void CleanupIccBackups()
@@ -116,11 +116,12 @@ namespace Ncp
             while(Data.Profiles.Any(p=>string.Equals(p.Name,name,StringComparison.OrdinalIgnoreCase))) {
                 string suffix=" ("+(n++)+")";name=profile.Name.Substring(0,Math.Min(profile.Name.Length,60-suffix.Length))+suffix;
             }
-            return AddProfile(name,profile.Presets,profile.Order);
+            return AddProfile(name,profile.Presets,profile.Order,profile.DefaultPresetRemoved);
         }
         public List<Preset> Presets()
         {
-            var items=new List<Preset>{DefaultPreset()};
+            var items=new List<Preset>();
+            if(HasDefaultPreset)items.Add(DefaultPreset());
             items.AddRange(Data.Presets);
             var byId=items.ToDictionary(p=>p.Id);
             var ordered=Data.PresetOrder.Where(byId.ContainsKey).Select(id=>byId[id]).ToList();
@@ -149,7 +150,25 @@ namespace Ncp
         {
             return Preset.Default();
         }
+        public bool HasDefaultPreset {get {return !Data.DefaultPresetRemoved;}}
+        public Preset AddDefaultPreset()
+        {
+            if(!CanSave)throw new IOException(StorageError);
+            if(HasDefaultPreset) {
+                int number=2;string name;
+                do {name="기본값 ("+(number++)+")";}while(Data.Presets.Any(p=>string.Equals(p.Name,name,StringComparison.OrdinalIgnoreCase)));
+                return SavePreset(null,name,new ColorValues());
+            }
+            var previousOrder=Data.PresetOrder;
+            var order=Presets().Select(p=>p.Id).ToList();order.Add("default");
+            Data.DefaultPresetRemoved=false;Data.PresetOrder=order;
+            try {Persist();}
+            catch {Data.DefaultPresetRemoved=true;Data.PresetOrder=previousOrder;SyncProfile();throw;}
+            return DefaultPreset();
+        }
         public AppliedRecord LastApplied {get {return Selected==null?null:Data.Applied.FirstOrDefault(a=>a.DisplayKey==Selected.Key);} }
+        static bool IsNeutralReset(ColorValues values,IccProfileRef icc) {return icc==null && values.Same(new ColorValues());}
+        bool LastAppliedIsReset {get {return LastApplied!=null && IsNeutralReset(LastApplied.Values,LastApplied.Icc);}}
         public Preset LastAppliedPreset()
         {
             var last=LastApplied;
@@ -159,7 +178,7 @@ namespace Ncp
         {
             get {
                 var last=LastApplied;
-                if(last!=null && last.PresetId=="default" && iccBackend!=null
+                if(LastAppliedIsReset && iccBackend!=null
                     && (iccReading==null || IccAssociationPolicy.ContainsNcp(iccReading)))return false;
                 return last!=null && Reading!=null && Reading.Vibrance==last.Values.Vibrance
                     && Reading.Hue==last.Values.Hue && Reading.Fingerprint==last.PanelFingerprint
@@ -199,7 +218,7 @@ namespace Ncp
             Reading=backend.Read(Selected);
             iccReading=null;
             if(iccBackend!=null && (Data.IccOriginals.Any(o=>o.DisplayKey==Selected.Key)
-                || (LastApplied!=null && LastApplied.PresetId=="default"))) {
+                || LastAppliedIsReset)) {
                 try {iccReading=iccBackend.Read(Selected);}catch { }
             }
             // Never reconstruct gamma from a last-used label. A mismatch only invalidates the session status.
@@ -207,7 +226,7 @@ namespace Ncp
                 && Reading.Vibrance==sessionValues.Vibrance && Reading.Hue==sessionValues.Hue
                 && Reading.Fingerprint==sessionFingerprint;
             if(LastApplied!=null && LastApplied.IccFingerprint!=null && (iccReading==null || iccReading.Fingerprint!=LastApplied.IccFingerprint))AppliedInSession=false;
-            if(LastApplied!=null && LastApplied.PresetId=="default" && iccBackend!=null
+            if(LastAppliedIsReset && iccBackend!=null
                 && (iccReading==null || IccAssociationPolicy.ContainsNcp(iccReading)))AppliedInSession=false;
             // Capture only unambiguous first-run panel values. They are a saved-panel baseline, not a live LUT backup.
             if(CanSave && Original==null && LastApplied==null && Reading.PanelValues!=null && Reading.Channels!=null) {
@@ -239,8 +258,15 @@ namespace Ncp
         }
         public void Delete(string id)
         {
-            if(id=="default") throw new InvalidOperationException("기본값은 삭제할 수 없습니다.");
             if(!CanSave) throw new IOException(StorageError);
+            if(id=="default") {
+                if(!HasDefaultPreset)return;
+                var previousOrder=Data.PresetOrder;Data.DefaultPresetRemoved=true;
+                Data.PresetOrder=previousOrder.Where(p=>p!="default").ToList();
+                try {Persist();}
+                catch {Data.DefaultPresetRemoved=false;Data.PresetOrder=previousOrder;SyncProfile();throw;}
+                return;
+            }
             Data.Presets.RemoveAll(p=>p.Id==id); Data.PresetOrder.Remove(id); Persist();
             CleanupIccBackups();
             // Deleting an active preset does not change the display. Its independent applied snapshot remains.
@@ -258,9 +284,11 @@ namespace Ncp
         {
             if(backend==null || Selected==null) throw new InvalidOperationException("적용할 NVIDIA 모니터를 선택하세요.");
             if(!CanSave) throw new IOException(StorageError);
+            if(preset.Id=="default" && !HasDefaultPreset)throw new InvalidOperationException("기본값 프리셋이 삭제되었습니다. ‘기본값 추가’로 다시 넣어주세요.");
             preset=preset.Id=="default"?DefaultPreset():Data.Presets.SingleOrDefault(p=>p.Id==preset.Id);
             if(preset==null) throw new InvalidOperationException("삭제되었거나 저장되지 않은 프리셋입니다.");
             preset.Validate();
+            bool neutralReset=IsNeutralReset(preset.Values,preset.Icc);
             Refresh();
             var before=AppliedInSession?sessionValues:null;
             var iccOriginal=Data.IccOriginals.FirstOrDefault(o=>o.DisplayKey==Selected.Key);
@@ -268,7 +296,7 @@ namespace Ncp
             // A moved/reinstalled program can have no ownership history while old
             // NCP associations still exist in Windows. The default button repairs them.
             bool orphaned=false;
-            if(preset.Id=="default" && iccOriginal==null && iccBackend!=null) {
+            if(neutralReset && iccOriginal==null && iccBackend!=null) {
                 var current=iccBackend.Read(Selected);
                 if(IccAssociationPolicy.ContainsNcp(current)) {beforeIcc=current;orphaned=true;}
             }
@@ -319,7 +347,7 @@ namespace Ncp
             try { Persist(); }
             catch(Exception e) {throw new IOException("색상 적용은 성공했지만 기록을 저장하지 못했습니다.\n"+e.Message,e);}
             Refresh();
-            if(beforeIcc!=null || (preset.Id=="default" && iccBackend!=null)) {
+            if(beforeIcc!=null || (neutralReset && iccBackend!=null)) {
                 try {CleanupIccCopies();}
                 catch(Exception e) {throw new IOException("색상 적용은 완료했지만, 사용하지 않는 NCP ICC 사본을 정리하지 못했습니다.\n"+e.Message,e);}
             }

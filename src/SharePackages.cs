@@ -19,6 +19,7 @@ namespace Ncp
             [DataMember(IsRequired=true)] public string Name;
             [DataMember(IsRequired=true)] public List<Preset> Presets;
             [DataMember] public List<string> Order;
+            [DataMember(EmitDefaultValue=false)] public bool DefaultPresetRemoved;
         }
         public static void ExportPreset(string path,Preset preset,IccLibrary library)
         {
@@ -26,7 +27,7 @@ namespace Ncp
         }
         public static void ExportProfile(string path,PresetProfile profile,IccLibrary library)
         {
-            profile.Validate();Write(path,new Manifest {Kind="NCP.Profile",Name=profile.Name,Presets=profile.Presets,Order=profile.Order},library);
+            profile.Validate();Write(path,new Manifest {Kind="NCP.Profile",Name=profile.Name,Presets=profile.Presets,Order=profile.Order,DefaultPresetRemoved=profile.DefaultPresetRemoved},library);
         }
         static string EntryName(IccProfileRef profile) {return "icc/NCP-"+profile.Hash+".icc";}
         static void Write(string path,Manifest manifest,IccLibrary library)
@@ -77,7 +78,8 @@ namespace Ncp
                 if(manifest==null || manifest.Kind!=kind || manifest.Version!=1 || manifest.Presets==null)
                     throw new InvalidDataException("지원하지 않는 NCP 공유 파일입니다.");
                 var profile=new PresetProfile {Id="package",Name=manifest.Name,Presets=manifest.Presets,Order=manifest.Order};
-                // A single default preset can be exported; profile collections retain the receiver's own default.
+                // A single default can be shared as an ordinary preset; profile packages
+                // also preserve whether the fixed default is present in their collection.
                 if(kind=="NCP.Preset") {
                     if(manifest.Presets.Count!=1)throw new InvalidDataException("프리셋 공유 파일에 여러 프리셋이 들어 있습니다.");
                     manifest.Presets[0].Validate();
@@ -109,7 +111,7 @@ namespace Ncp
         }
         static PresetProfile ToProfile(Manifest manifest)
         {
-            return new PresetProfile {Id=Guid.NewGuid().ToString("N"),Name=manifest.Name,Presets=manifest.Presets,Order=manifest.Order??new List<string>()};
+            return new PresetProfile {Id=Guid.NewGuid().ToString("N"),Name=manifest.Name,Presets=manifest.Presets,Order=manifest.Order??new List<string>(),DefaultPresetRemoved=manifest.DefaultPresetRemoved};
         }
     }
 }

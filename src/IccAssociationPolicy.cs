@@ -69,7 +69,8 @@ namespace Ncp
             var actual=api.Read(display);
             if(!actual.PerUser || !string.Equals(actual.ProfileName,name,StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Windows ICC 적용 결과가 일치하지 않습니다.\n대상: "+display.GdiName+
-                    "\n사용자별 설정: "+(actual.PerUser?"켜짐":"꺼짐")+"\n요청 ICC: "+name+"\n조회 ICC: "+(actual.ProfileName??"없음"));
+                    "\n사용자별 설정: "+(actual.PerUser?"켜짐":"꺼짐")+"\n요청 ICC: "+name+"\n조회 ICC: "+(actual.ProfileName??"없음")+
+                    "\n연결 목록: "+string.Join(", ",actual.Profiles??new List<string>()));
         }
         internal void Restore(DisplayTarget display,IccState original,IEnumerable<string> managed,bool exact=false)
         {

@@ -65,7 +65,7 @@ namespace Ncp
         IccProfileRef selectedIcc;
         Label notice;
         RangeRow brightness,contrast,gamma,vibrance,hue;
-        Button save,duplicate,delete,import,export;
+        Button save,duplicate,delete,import,export,defaultAdd;
         Button profileDelete,profileRename,profileInitial,iccClear;
         Preset selected;
         bool loading,dirty,pendingDelete;
@@ -92,7 +92,7 @@ namespace Ncp
                     controller.SavePreset(null,"FPS",new ColorValues {Brightness=53,Contrast=58,Gamma=1.12,Vibrance=72,Hue=0});
                 if(startupError==null)controller.RefreshDisplays();
                 ReloadDisplays();ReloadProfiles();
-                SelectPreset(controller.LastAppliedPreset() ?? controller.DefaultPreset());
+                SelectPreset(PreferredPreset());
                 RebuildPresets();
                 controller.CleanupIccBackups();
                 if(startupError!=null)ShowError(startupError);
@@ -119,7 +119,7 @@ namespace Ncp
             profiles=new ComboBox {Dock=DockStyle.Fill,DropDownStyle=ComboBoxStyle.DropDownList,AccessibleName="프로필 목록",Margin=new Padding(3,4,6,3)};
             profiles.SelectedIndexChanged+=delegate {
                 if(loading || profiles.SelectedItem==null)return;
-                Run(delegate {controller.SwitchProfile(((PresetProfile)profiles.SelectedItem).Id);SelectPreset(controller.LastAppliedPreset()??controller.DefaultPreset());RebuildPresets();pendingProfileDelete=false;profileDelete.Text="삭제";});
+                Run(delegate {controller.SwitchProfile(((PresetProfile)profiles.SelectedItem).Id);SelectPreset(PreferredPreset());RebuildPresets();pendingProfileDelete=false;profileDelete.Text="삭제";});
             };
             profileBar.Controls.Add(profiles,1,0);
             profileRename=MakeButton("이름 변경");profileRename.Click+=delegate {RenameProfile();};profileBar.Controls.Add(profileRename,2,0);
@@ -140,14 +140,14 @@ namespace Ncp
                 if(loading || display.SelectedItem==null)return;
                 Run(delegate {
                     controller.Select((DisplayTarget)display.SelectedItem);
-                    SelectPreset(controller.LastAppliedPreset() ?? controller.DefaultPreset()); RebuildPresets();
+                    SelectPreset(PreferredPreset()); RebuildPresets();
                 });
             };
             monitors.Controls.Add(display,1,0);
             var refresh=MakeButton("새로고침");
             refresh.Click+=delegate {Run(delegate {
                 controller.RefreshDisplays(); ReloadDisplays();
-                if(!dirty)SelectPreset(controller.LastAppliedPreset() ?? controller.DefaultPreset());
+                if(!dirty)SelectPreset(PreferredPreset());
                 RebuildPresets(); UpdateEditor();
             });};
             monitors.Controls.Add(refresh,2,0); root.Controls.Add(monitors,0,1);
@@ -157,8 +157,9 @@ namespace Ncp
             body.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100)); root.Controls.Add(body,0,2);
 
             var listGroup=new GroupBox {Text="프리셋",Dock=DockStyle.Fill,Padding=new Padding(9),Margin=new Padding(0,0,8,0)};
-            var listLayout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Margin=new Padding(0)};
+            var listLayout=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Margin=new Padding(0)};
             listLayout.RowStyles.Add(new RowStyle(SizeType.Percent,100));
+            listLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,36));
             listLayout.RowStyles.Add(new RowStyle(SizeType.Absolute,36)); listGroup.Controls.Add(listLayout);
             presets=new DataGridView {Dock=DockStyle.Fill,AccessibleName="프리셋 목록",Margin=new Padding(0,3,0,6),AllowDrop=true,
                 AllowUserToAddRows=false,AllowUserToDeleteRows=false,AllowUserToResizeRows=false,AllowUserToResizeColumns=false,
@@ -189,11 +190,14 @@ namespace Ncp
             presets.DragDrop+=PresetDragDrop;
             presets.Paint+=PaintDropInsertion;
             listLayout.Controls.Add(presets,0,0);
+            defaultAdd=MakeButton("기본값 추가");
+            defaultAdd.Click+=delegate {Run(delegate {SelectPreset(controller.AddDefaultPreset());RebuildPresets();});};
+            listLayout.Controls.Add(defaultAdd,0,1);
             var sharing=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=2,RowCount=1,Margin=new Padding(0)};
             sharing.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50)); sharing.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,50));
             import=MakeButton("가져오기"); import.Click+=delegate {Import();};
             export=MakeButton("내보내기"); export.Click+=delegate {Export();};
-            sharing.Controls.Add(import,0,0); sharing.Controls.Add(export,1,0); listLayout.Controls.Add(sharing,0,1); body.Controls.Add(listGroup,0,0);
+            sharing.Controls.Add(import,0,0); sharing.Controls.Add(export,1,0); listLayout.Controls.Add(sharing,0,2); body.Controls.Add(listGroup,0,0);
 
             var editorGroup=new GroupBox {Text="색상 설정",Dock=DockStyle.Fill,Padding=new Padding(10),Margin=new Padding(0)};
             var editor=new TableLayoutPanel {Dock=DockStyle.Fill,ColumnCount=1,RowCount=9,Margin=new Padding(0)};
@@ -365,12 +369,14 @@ namespace Ncp
             if(y<0 || y>=presets.ClientSize.Height)return;
             using(var pen=new Pen(SystemColors.ControlDarkDark,2))e.Graphics.DrawLine(pen,1,y,presets.ClientSize.Width-2,y);
         }
+        Preset PreferredPreset() {return controller.LastAppliedPreset()??controller.Presets().FirstOrDefault();}
         void SelectPreset(Preset preset)
         {
-            selected=preset; loading=true; name.Text=preset.Name;
-            brightness.Value=preset.Values.Brightness; contrast.Value=preset.Values.Contrast; gamma.Value=preset.Values.Gamma;
-            vibrance.Value=preset.Values.Vibrance; hue.Value=preset.Values.Hue;
-            selectedIcc=preset.Icc;UpdateIccName();
+            selected=preset; loading=true; name.Text=preset==null?"":preset.Name;
+            var values=preset==null?new ColorValues():preset.Values;
+            brightness.Value=values.Brightness; contrast.Value=values.Contrast; gamma.Value=values.Gamma;
+            vibrance.Value=values.Vibrance; hue.Value=values.Hue;
+            selectedIcc=preset==null?null:preset.Icc;UpdateIccName();
             loading=false; dirty=false; pendingDelete=false; UpdateEditor();
         }
         ColorValues EditorValues()
@@ -384,15 +390,16 @@ namespace Ncp
         }
         void UpdateEditor()
         {
-            if(selected==null)return;
-            save.Enabled=selected.Id!="default" && dirty && controller.CanSave;
+            save.Enabled=selected!=null && selected.Id!="default" && dirty && controller.CanSave;
             duplicate.Enabled=controller.CanSave; import.Enabled=controller.CanSave;
-            delete.Enabled=selected.Id!="default" && controller.CanSave; delete.Text=pendingDelete?"삭제 확인":"삭제";
-            export.Enabled=true;
+            delete.Enabled=selected!=null && controller.CanSave; delete.Text=pendingDelete?"삭제 확인":"삭제";
+            export.Enabled=selected!=null;
+            defaultAdd.Enabled=controller.CanSave && (!controller.HasDefaultPreset || controller.Data.Presets.Count<200);
             iccClear.Enabled=selectedIcc!=null;
         }
         void Save(bool asNew)
         {
+            if(!asNew && selected==null)return;
             Run(delegate {
                 string title=name.Text;
                 if(asNew && selected!=null && title==selected.Name)
@@ -408,9 +415,9 @@ namespace Ncp
         }
         void Delete()
         {
-            if(selected==null || selected.Id=="default")return;
+            if(selected==null)return;
             if(!pendingDelete) {pendingDelete=true; UpdateEditor(); return;}
-            Run(delegate {controller.Delete(selected.Id); SelectPreset(controller.LastAppliedPreset() ?? controller.DefaultPreset()); RebuildPresets();});
+            Run(delegate {controller.Delete(selected.Id); SelectPreset(PreferredPreset()); RebuildPresets();});
         }
         void ApplyPreset(Preset preset)
         {
@@ -447,12 +454,12 @@ namespace Ncp
         {
             string current=controller.ActiveProfile.Name;
             string value=AskProfileName(this,copy?current.Substring(0,Math.Min(57,current.Length))+" 복사":"새 프로필");if(value==null)return;
-            Run(delegate {controller.CreateProfile(value,copy);ReloadProfiles();SelectPreset(controller.DefaultPreset());RebuildPresets();});
+            Run(delegate {controller.CreateProfile(value,copy);ReloadProfiles();SelectPreset(PreferredPreset());RebuildPresets();});
         }
         void DeleteProfile()
         {
             if(!pendingProfileDelete) {pendingProfileDelete=true;profileDelete.Text="삭제 확인";return;}
-            Run(delegate {controller.DeleteProfile();ReloadProfiles();SelectPreset(controller.LastAppliedPreset()??controller.DefaultPreset());RebuildPresets();});
+            Run(delegate {controller.DeleteProfile();ReloadProfiles();SelectPreset(PreferredPreset());RebuildPresets();});
         }
         void RenameProfile()
         {
@@ -462,11 +469,11 @@ namespace Ncp
         void ImportProfile()
         {
             using(var dialog=new OpenFileDialog {Title="NCP 프로필 가져오기",Filter="NCP 프로필 (*.ncpprofile)|*.ncpprofile",Multiselect=false})
-                if(dialog.ShowDialog(this)==DialogResult.OK)Run(delegate {controller.ImportProfile(dialog.FileName);ReloadProfiles();SelectPreset(controller.DefaultPreset());RebuildPresets();});
+                if(dialog.ShowDialog(this)==DialogResult.OK)Run(delegate {controller.ImportProfile(dialog.FileName);ReloadProfiles();SelectPreset(PreferredPreset());RebuildPresets();});
         }
         void AddInitialProfile()
         {
-            Run(delegate {controller.AddInitialProfile();ReloadProfiles();SelectPreset(controller.DefaultPreset());RebuildPresets();});
+            Run(delegate {controller.AddInitialProfile();ReloadProfiles();SelectPreset(PreferredPreset());RebuildPresets();});
         }
         void ExportProfile()
         {

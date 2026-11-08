@@ -22,9 +22,11 @@ namespace Ncp
             string root=Path.Combine(directory,"icc-and-profiles");Directory.CreateDirectory(root);
             VerifyAssociations(check,reject,root);
             DisplayRegressionTests.Run(check,reject,root);
+            AdvancedColorTests.Run(check,reject);
             VerifyBackupCleanup(check,reject,root);
             VerifyBundledProfile(check,reject,root);
             VerifyInitialProfileAddition(check,reject,root);
+            VerifyDefaultPresetManagement(check,reject,root);
             var data=ProfileBytes();string original=Path.Combine(root,"야간.icc");File.WriteAllBytes(original,data);
             var library=new IccLibrary(Path.Combine(root,"program"));var reference=library.Import(original);
             check(File.Exists(library.PathFor(reference)) && library.PathFor(reference).StartsWith(library.DirectoryPath),"ICC import creates a program-local backup");
@@ -131,7 +133,7 @@ namespace Ncp
             using(var controller=new Controller(store,color,windows)) {
                 controller.RefreshDisplays();profileId=controller.ActiveProfile.Id;
                 check(controller.CanSave && File.Exists(store.FilePath) && controller.Data.Profiles.Count==1 && controller.ActiveProfile.Name=="기본 프로필","first application startup persists the bundled default profile");
-                check(controller.Presets().Select(p=>p.Name).SequenceEqual(new[]{"기본값","맑음","흐림 & 안개 & 비","야간","범용"}),"bundled presets preserve the supplied order and include one protected neutral default");
+                check(controller.Presets().Select(p=>p.Name).SequenceEqual(new[]{"기본값","맑음","흐림 & 안개 & 비","야간","범용"}),"bundled presets preserve the supplied order and include one neutral default");
                 var day=controller.Data.Presets.Single(p=>p.Name=="맑음");var fog=controller.Data.Presets.Single(p=>p.Name=="흐림 & 안개 & 비");var night=controller.Data.Presets.Single(p=>p.Name=="야간");var general=controller.Data.Presets.Single(p=>p.Name=="범용");
                 check(day.Values.Same(new ColorValues {Contrast=40,Gamma=1.4,Vibrance=70}) && fog.Values.Same(new ColorValues {Brightness=45,Contrast=55,Gamma=1.25,Vibrance=80}) && night.Values.Same(new ColorValues {Brightness=30,Contrast=70,Gamma=1.75,Vibrance=85}) && general.Values.Same(new ColorValues {Gamma=0.95,Vibrance=70}),"bundled presets contain their configured NVIDIA color values");
                 check(day.Icc.Hash==fog.Icc.Hash && general.Icc.Hash==fog.Icc.Hash && day.Icc.Name=="bright.icc" && night.Icc.Name=="more_brighter.icc" && day.Icc.Hash!=night.Icc.Hash,"bundled presets retain their supplied ICC associations");
@@ -190,6 +192,100 @@ namespace Ncp
             using(var controller=new Controller(broken,color,windows))
                 reject(delegate {controller.AddInitialProfile();},"initial-profile addition is blocked when existing settings cannot be read safely");
             check(!Directory.Exists(Path.Combine(broken.DirectoryPath,"icc")),"blocked initial-profile addition does not create ICC backups");
+        }
+        static void VerifyDefaultPresetManagement(Action<bool,string> check,Action<Action,string> reject,string directory)
+        {
+            var store=new Store(Path.Combine(directory,"optional-default"));var color=new CountingColor();var windows=new CountingIcc();
+            string originalId;string package=Path.Combine(directory,"no-default.ncpprofile");
+            using(var controller=new Controller(store,color,windows)) {
+                controller.RefreshDisplays();originalId=controller.ActiveProfile.Id;
+                var custom=controller.SavePreset(null,"사용자 설정",new ColorValues {Gamma=1.4});
+                var neutral=controller.DefaultPreset();controller.Apply(neutral);var applied=controller.LastApplied;
+                controller.Delete("default");
+                check(!controller.HasDefaultPreset && controller.Presets().Single().Id==custom.Id && controller.LastAppliedPreset()==null,
+                    "deleting the applied default removes its row and applied badge without removing custom presets");
+                check(color.Writes==1 && windows.Writes==0 && object.ReferenceEquals(controller.LastApplied,applied),
+                    "default deletion preserves the actual display colors and independent application record");
+                reject(delegate {controller.Apply(neutral);},"a deleted default cannot be applied through a stale row");
+                controller.ExportProfile(package);var copied=controller.CreateProfile("복사",true);
+                check(copied.DefaultPresetRemoved && controller.Presets().All(p=>p.Id!="default"),"profile copying preserves the removed default");
+                controller.CreateProfile("빈 프로필",false);
+                check(controller.HasDefaultPreset && controller.Presets().Single().Id=="default","a new profile starts with its own default preset");
+                var imported=controller.ImportProfile(package);
+                check(imported.DefaultPresetRemoved && controller.Presets().Single().Name=="사용자 설정",
+                    "profile export and import preserve the absence of the default preset");
+                controller.AddInitialProfile();check(controller.HasDefaultPreset && controller.Presets().Count==5,
+                    "adding the initial profile includes its default independently of other profiles");
+                controller.SwitchProfile(originalId);
+                check(!controller.HasDefaultPreset,"switching profiles remembers each profile's default deletion separately");
+                var restored=controller.AddDefaultPreset();
+                check(controller.HasDefaultPreset && restored.Values.Same(new ColorValues()) && restored.Icc==null
+                    && controller.Presets().Select(p=>p.Id).SequenceEqual(new[]{custom.Id,"default"}),
+                    "default addition appends one neutral 50/50/1/50/0 preset without ICC and preserves custom ordering");
+                var second=controller.AddDefaultPreset();var third=controller.AddDefaultPreset();
+                check(second.Id!="default" && third.Id!=second.Id && second.Name=="기본값 (2)" && third.Name=="기본값 (3)"
+                    && second.Values.Same(new ColorValues()) && third.Values.Same(new ColorValues()) && second.Icc==null && third.Icc==null,
+                    "each additional default gets its own identity, numbered name and neutral values without ICC");
+                check(controller.Presets().Count==4 && controller.LastAppliedPreset().Id=="default",
+                    "adding duplicate defaults preserves the original default and its actual applied badge");
+                using(var reopened=new Controller(new Store(store.DirectoryPath),color,windows))
+                    check(reopened.Presets().Select(p=>p.Id).SequenceEqual(controller.Presets().Select(p=>p.Id)),
+                        "duplicate defaults preserve independent identities and ordering across restart");
+                controller.ExportProfile(package);
+                var duplicateProfile=controller.ImportProfile(package);
+                check(controller.Presets().Select(p=>p.Name).SequenceEqual(new[]{"사용자 설정","기본값","기본값 (2)","기본값 (3)"}),
+                    "profile sharing retains every default copy in the correct order");
+                controller.DeleteProfile();controller.SwitchProfile(originalId);
+                controller.Delete(second.Id);
+                check(controller.Presets().Any(p=>p.Id=="default") && controller.Presets().Any(p=>p.Id==third.Id),
+                    "deleting one default copy preserves the other copies");
+                controller.Delete(third.Id);
+                check(color.Writes==1 && windows.Writes==0,"default addition, profile copying, importing and switching never apply display colors");
+                controller.Delete("default");controller.Delete(custom.Id);
+                check(controller.Presets().Count==0,"all presets including the default can be removed");
+            }
+            using(var reopened=new Controller(new Store(store.DirectoryPath),color,windows)) {
+                check(reopened.ActiveProfile.Id==originalId && reopened.Presets().Count==0 && !reopened.HasDefaultPreset,
+                    "an empty preset list and removed default persist after restarting");
+                reopened.AddDefaultPreset();check(reopened.Presets().Single().Id=="default" && color.Writes==1 && windows.Writes==0,
+                    "the default can be restored to an empty list without changing display colors");
+            }
+            VerifyDefaultPresetUi(check,directory);
+        }
+        static T UiField<T>(MainForm form,string field) where T:class
+        {
+            return (T)typeof(MainForm).GetField(field,System.Reflection.BindingFlags.Instance|System.Reflection.BindingFlags.NonPublic).GetValue(form);
+        }
+        static void Click(System.Windows.Forms.Button button)
+        {
+            button.PerformClick();
+        }
+        static void VerifyDefaultPresetUi(Action<bool,string> check,string directory)
+        {
+            System.Windows.Forms.Application.EnableVisualStyles();
+            var store=new Store(Path.Combine(directory,"optional-default-ui"));var color=new CountingColor();
+            using(var controller=new Controller(store,color))using(var form=new MainForm(controller,null,false)) {
+                form.ShowInTaskbar=false;form.StartPosition=System.Windows.Forms.FormStartPosition.Manual;
+                form.Location=new System.Drawing.Point(-32000,-32000);form.Show();System.Windows.Forms.Application.DoEvents();
+                var grid=UiField<System.Windows.Forms.DataGridView>(form,"presets");
+                var add=UiField<System.Windows.Forms.Button>(form,"defaultAdd");var delete=UiField<System.Windows.Forms.Button>(form,"delete");
+                check(grid.Rows.Count==1 && delete.Enabled && add.Enabled,"the add button remains enabled while the original default is present");
+                Click(add);Click(add);
+                check(grid.Rows.Count==3 && add.Enabled && controller.Presets().Select(p=>p.Name).SequenceEqual(new[]{"기본값","기본값 (2)","기본값 (3)"})
+                    && color.Writes==0,"two real add-button clicks create two separate defaults without applying display colors");
+                Click(delete);Click(delete);Click(delete);Click(delete);
+                Click(delete);Click(delete);
+                check(grid.Rows.Count==0 && add.Enabled && !delete.Enabled && !UiField<System.Windows.Forms.Button>(form,"save").Enabled
+                    && !UiField<System.Windows.Forms.Button>(form,"export").Enabled && UiField<System.Windows.Forms.Button>(form,"duplicate").Enabled,
+                    "deleting the last default leaves an empty editor with working add and new-preset controls");
+                Click(add);check(grid.Rows.Count==1 && add.Enabled && delete.Enabled && color.Writes==0,
+                    "the actual add-button handler restores the default row without applying it");
+                Click(delete);Click(delete);UiField<System.Windows.Forms.TextBox>(form,"name").Text="빈 목록에서 추가";
+                Click(UiField<System.Windows.Forms.Button>(form,"duplicate"));
+                check(grid.Rows.Count==1 && controller.Presets().Single().Name=="빈 목록에서 추가" && add.Enabled && color.Writes==0,
+                    "a custom preset can be created from the empty editor after deleting the default");
+                using(var bitmap=new System.Drawing.Bitmap(form.Width,form.Height)) {form.DrawToBitmap(bitmap,new System.Drawing.Rectangle(0,0,bitmap.Width,bitmap.Height));bitmap.Save(Path.Combine(directory,"default-add-ui.png"));}
+            }
         }
         static void VerifyBackupCleanup(Action<bool,string> check,Action<Action,string> reject,string directory)
         {
@@ -324,6 +420,14 @@ namespace Ncp
             using(var repair=new Controller(new Store(Path.Combine(directory,"orphan-install-only")),new CountingColor(),cleanWindows)) {
                 repair.RefreshDisplays();repair.Apply(repair.DefaultPreset());
                 check(cleanWindows.Cleanups==1,"default scans unused Windows installations even without device associations or ICC history");
+            }
+            var copyApi=new AssociationApi {Selected=a};copyApi.Attached.AddRange(new[]{"my-monitor.icm",a,b});
+            using(var repair=new Controller(new Store(Path.Combine(directory,"copied-default-repair")),new CountingColor(),new AssociationBackend(copyApi))) {
+                repair.RefreshDisplays();var copy=repair.AddDefaultPreset();repair.Apply(copy);
+                check(copy.Id!="default" && copyApi.Attached.SequenceEqual(new[]{"my-monitor.icm"}) && repair.LastAppliedPreset().Id==copy.Id,
+                    "applying a default copy performs the same orphaned NCP ICC cleanup as the original default");
+                copyApi.Attached.Add(b);repair.Refresh();
+                check(!repair.HasReadableMatch && !repair.AppliedInSession,"a leftover NCP ICC also invalidates the applied badge of a default copy");
             }
             string installed=Path.Combine(directory,"installed-fixture");Directory.CreateDirectory(installed);
             var bytes=ProfileBytes();string hash=IccLibrary.Hash(bytes);

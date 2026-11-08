@@ -49,7 +49,7 @@ namespace Ncp
                 Check(backend.Writes==0,"startup performs no display writes");
                 Check(ctrl.Original!=null && ctrl.Original.Values.Gamma==1.1 && ctrl.Original.Values.Vibrance==75,"preserve the first panel snapshot independently of the default preset");
                 Check(ctrl.DefaultPreset().Values.Same(new ColorValues()) && ctrl.DefaultPreset().Name=="기본값","default values stay at 50/50/1/50/0 despite a captured vibrance of 75 and non-neutral RGB gamma");
-                Reject(delegate{ctrl.Delete("default");},"default cannot be deleted");
+                ctrl.Delete("default");Check(!ctrl.HasDefaultPreset,"default can be deleted");ctrl.AddDefaultPreset();
                 Reject(delegate{ctrl.SavePreset("default","overwrite",new ColorValues());},"default cannot be overwritten");
                 var preset=ctrl.SavePreset(null,"경쟁 FPS",new ColorValues {Gamma=1.15,Vibrance=70});
                 Check(backend.Writes==0,"saving a preset performs no display writes");
@@ -103,7 +103,7 @@ namespace Ncp
                 Check(controller.Presets().Select(p=>p.Id).SequenceEqual(new[]{"default",a.Id,b.Id,c.Id}),"move a preset to the end");
                 controller.MovePreset("default",4);
                 Check(controller.Presets().Last().Id=="default","default preset can be reordered");
-                Reject(delegate {controller.Delete("default");},"reordered default preset remains protected");
+                controller.Delete("default");Check(!controller.HasDefaultPreset,"a reordered default preset can be deleted");controller.AddDefaultPreset();
                 Check(!controller.MovePreset("default",4),"dropping in the same position is a no-op");
                 controller.Delete(a.Id);
                 Check(controller.Presets().Select(p=>p.Id).SequenceEqual(new[]{b.Id,c.Id,"default"}),"deleting preserves the remaining order");

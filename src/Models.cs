@@ -138,6 +138,7 @@ namespace Ncp
         [DataMember(IsRequired=true)] public string Name;
         [DataMember(IsRequired=true)] public List<Preset> Presets=new List<Preset>();
         [DataMember] public List<string> Order=new List<string>();
+        [DataMember(EmitDefaultValue=false)] public bool DefaultPresetRemoved;
         public override string ToString() {return Name;}
         public void Validate()
         {
@@ -159,6 +160,7 @@ namespace Ncp
         [DataMember(IsRequired=true)] public int Version=1;
         [DataMember(IsRequired=true)] public List<Preset> Presets=new List<Preset>();
         [DataMember] public List<string> PresetOrder=new List<string>();
+        [DataMember(EmitDefaultValue=false)] public bool DefaultPresetRemoved;
         [DataMember] public List<AppliedRecord> Applied=new List<AppliedRecord>();
         [DataMember] public List<OriginalRecord> Originals=new List<OriginalRecord>();
         [DataMember] public List<IccOriginal> IccOriginals=new List<IccOriginal>();
