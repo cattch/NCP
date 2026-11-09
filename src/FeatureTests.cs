@@ -133,10 +133,15 @@ namespace Ncp
             using(var controller=new Controller(store,color,windows)) {
                 controller.RefreshDisplays();profileId=controller.ActiveProfile.Id;
                 check(controller.CanSave && File.Exists(store.FilePath) && controller.Data.Profiles.Count==1 && controller.ActiveProfile.Name=="기본 프로필","first application startup persists the bundled default profile");
-                check(controller.Presets().Select(p=>p.Name).SequenceEqual(new[]{"기본값","맑음","흐림 & 안개 & 비","야간","범용"}),"bundled presets preserve the supplied order and include one neutral default");
-                var day=controller.Data.Presets.Single(p=>p.Name=="맑음");var fog=controller.Data.Presets.Single(p=>p.Name=="흐림 & 안개 & 비");var night=controller.Data.Presets.Single(p=>p.Name=="야간");var general=controller.Data.Presets.Single(p=>p.Name=="범용");
-                check(day.Values.Same(new ColorValues {Contrast=40,Gamma=1.4,Vibrance=70}) && fog.Values.Same(new ColorValues {Brightness=45,Contrast=55,Gamma=1.25,Vibrance=80}) && night.Values.Same(new ColorValues {Brightness=30,Contrast=70,Gamma=1.75,Vibrance=85}) && general.Values.Same(new ColorValues {Gamma=0.95,Vibrance=70}),"bundled presets contain their configured NVIDIA color values");
-                check(day.Icc.Hash==fog.Icc.Hash && general.Icc.Hash==fog.Icc.Hash && day.Icc.Name=="bright.icc" && night.Icc.Name=="more_brighter.icc" && day.Icc.Hash!=night.Icc.Hash,"bundled presets retain their supplied ICC associations");
+                check(controller.Presets().Select(p=>p.Name).SequenceEqual(new[]{"기본값","맑음","안개 & 비","야간","범용"}),"bundled presets preserve the supplied order and include one neutral default");
+                var day=controller.Data.Presets.Single(p=>p.Name=="맑음");var fog=controller.Data.Presets.Single(p=>p.Name=="안개 & 비");var night=controller.Data.Presets.Single(p=>p.Name=="야간");var general=controller.Data.Presets.Single(p=>p.Name=="범용");
+                check(day.Values.Same(new ColorValues {Brightness=45,Contrast=70,Gamma=1.05,Vibrance=75})
+                    && fog.Values.Same(new ColorValues {Brightness=45,Contrast=60,Gamma=1.25,Vibrance=80})
+                    && night.Values.Same(new ColorValues {Brightness=30,Contrast=70,Gamma=1.75,Vibrance=85})
+                    && general.Values.Same(new ColorValues {Gamma=0.95,Vibrance=70}),"bundled presets contain their configured NVIDIA color values");
+                check(day.Icc.Hash==night.Icc.Hash && day.Icc.Name=="more_brighter.icc" && night.Icc.Name=="more_brighter.icc"
+                    && general.Icc.Hash==fog.Icc.Hash && fog.Icc.Name=="bright.icc" && general.Icc.Name=="bright.icc"
+                    && day.Icc.Hash!=fog.Icc.Hash,"bundled presets retain their supplied ICC associations");
                 check(Directory.GetFiles(library.DirectoryPath).Length==2 && controller.Data.Presets.All(p=>IccLibrary.Hash(library.Read(p.Icc))==p.Icc.Hash),"first startup validates both ICC backups and stores the shared ICC only once beside settings");
                 check(color.Writes==0 && windows.Writes==0 && controller.Data.Applied.Count==0 && controller.Data.IccOriginals.Count==0,"initial profile creation never applies ICC or NVIDIA colors and records no pretend application");
                 controller.SavePreset(day.Id,"맑음 수정",new ColorValues {Gamma=1.2,Vibrance=65},day.Icc);
@@ -176,7 +181,9 @@ namespace Ncp
                 check(Directory.GetFiles(library.DirectoryPath).Length==0,"initial profile can be added after the original presets and ICC backups were deleted");
                 var added=controller.AddInitialProfile();addedId=added.Id;
                 check(controller.Data.Profiles.Count==2 && added.Name=="기본 프로필 (2)" && controller.ActiveProfile.Id==added.Id,"adding the initial profile creates and selects a separate uniquely named profile");
-                check(controller.Presets().Select(p=>p.Name).SequenceEqual(new[]{"기본값","맑음","흐림 & 안개 & 비","야간","범용"}) && added.Presets.Single(p=>p.Name=="맑음").Values.Same(new ColorValues {Contrast=40,Gamma=1.4,Vibrance=70}),"adding the initial profile restores the embedded presets and order");
+                check(controller.Presets().Select(p=>p.Name).SequenceEqual(new[]{"기본값","맑음","안개 & 비","야간","범용"})
+                    && added.Presets.Single(p=>p.Name=="맑음").Values.Same(new ColorValues {Brightness=45,Contrast=70,Gamma=1.05,Vibrance=75}),
+                    "adding the initial profile restores the embedded presets and order");
                 check(controller.Data.Profiles.Single(p=>p.Id==originalId).Presets.Single().Name=="사용자 설정" && added.Presets.All(p=>!previousIds.Contains(p.Id)),"initial profile addition preserves edited profiles and assigns fresh preset identities");
                 check(Directory.GetFiles(library.DirectoryPath).Length==2 && added.Presets.All(p=>IccLibrary.Hash(library.Read(p.Icc))==p.Icc.Hash),"initial profile addition recreates validated local ICC backups");
                 check(color.Writes==1 && windows.Writes==1 && windows.Installs==1 && object.ReferenceEquals(controller.LastApplied,applied) && controller.LastAppliedPreset()==null,"initial profile addition never applies or installs display profiles and preserves the actual applied record");

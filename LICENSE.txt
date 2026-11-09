@@ -3,7 +3,7 @@ Code license: GPL-3.0-only.
 Contains modified code from NvProfileSwitcher.
 Copyright (c) 2026 Maximiliano Carnevali and contributors.
 https://github.com/mgcarnevali/NvProfileSwitcher
-Modified version: 2026-11-08.
+Modified version: 2026-11-09.
 Corresponding source: the matching source archive published alongside this release.
 
                     GNU GENERAL PUBLIC LICENSE
