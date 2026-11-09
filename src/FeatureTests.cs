@@ -485,7 +485,7 @@ namespace Ncp
             public int Writes;public bool Fail;ColorValues current=new ColorValues();
             public List<DisplayTarget> Enumerate() {return new List<DisplayTarget>{new DisplayTarget {Key="test",Name="Test",GdiName="DISPLAY1"}};}
             public DisplayReading Read(DisplayTarget d) {return new DisplayReading {Vibrance=current.Vibrance,Hue=current.Hue};}
-            public void Apply(DisplayTarget d,ColorValues v,double[] c,ColorValues rollback,double[] r) {Writes++;if(Fail)throw new InvalidOperationException("NVIDIA test failure");current=v.Copy();}
+            public DisplayReading Apply(DisplayTarget d,ColorValues v,double[] c,ColorValues rollback,double[] r) {Writes++;if(Fail)throw new InvalidOperationException("NVIDIA test failure");current=v.Copy();return Read(d);}
             public void Dispose() {}
         }
         sealed class CountingIcc:IIccBackend

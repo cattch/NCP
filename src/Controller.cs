@@ -20,6 +20,7 @@ namespace Ncp
         public bool CanSave {get {return StorageError==null;} }
         public bool AppliedInSession {get;private set;}
         ColorValues sessionValues;
+        double[] sessionChannels;
         string sessionKey,sessionFingerprint;
         public Controller(Store store,IColorBackend backend,IIccBackend iccBackend=null)
         {
@@ -280,7 +281,7 @@ namespace Ncp
             return SavePreset(null,name,p.Values,p.Icc);
         }
         // This is the sole controller entry point that writes display colors. It is called only by mouse actions.
-        public void Apply(Preset preset)
+        public string Apply(Preset preset)
         {
             if(backend==null || Selected==null) throw new InvalidOperationException("적용할 NVIDIA 모니터를 선택하세요.");
             if(!CanSave) throw new IOException(StorageError);
@@ -291,6 +292,7 @@ namespace Ncp
             bool neutralReset=IsNeutralReset(preset.Values,preset.Icc);
             Refresh();
             var before=AppliedInSession?sessionValues:null;
+            var beforeChannels=AppliedInSession?sessionChannels:null;
             var iccOriginal=Data.IccOriginals.FirstOrDefault(o=>o.DisplayKey==Selected.Key);
             IccState beforeIcc=null;string installedName=null,appliedIccFingerprint=null;
             // A moved/reinstalled program can have no ownership history while old
@@ -320,15 +322,17 @@ namespace Ncp
                 if(changed)Persist();
             }
             AppliedInSession=false;
+            DisplayReading applied;
             try {
                 if(beforeIcc!=null) {
                     if(preset.Icc!=null)iccBackend.Apply(Selected,installedName,iccOriginal.ManagedProfiles);
                     else iccBackend.Restore(Selected,iccOriginal.State,iccOriginal.ManagedProfiles);
                     appliedIccFingerprint=iccBackend.Read(Selected).Fingerprint;
                 }
-                backend.Apply(Selected,preset.Values,null,before,null);
+                applied=backend.Apply(Selected,preset.Values,null,before,beforeChannels);
             } catch(Exception e) {
                 sessionValues=null;
+                sessionChannels=null;
                 if(beforeIcc!=null)try {iccBackend.Restore(Selected,beforeIcc,iccOriginal.ManagedProfiles,true);}catch(Exception restore) {
                     throw new InvalidOperationException(e.Message+"\nICC 복원도 실패했습니다: "+restore.Message,e);
                 }
@@ -338,10 +342,11 @@ namespace Ncp
                 throw;
             }
             sessionValues=preset.Values.Copy();
-            sessionKey=Selected.Key; sessionFingerprint=Reading.Fingerprint;
+            sessionChannels=applied.AppliedChannels;
+            sessionKey=Selected.Key; sessionFingerprint=applied.Fingerprint;
             AppliedInSession=true;
             var record=new AppliedRecord {DisplayKey=Selected.Key,PresetId=preset.Id,PresetName=preset.Name,Values=preset.Values.Copy(),
-                AppliedUtc=DateTime.UtcNow.ToString("o"),PanelFingerprint=Reading.Fingerprint,Icc=preset.Icc,
+                AppliedUtc=DateTime.UtcNow.ToString("o"),PanelFingerprint=applied.Fingerprint,Icc=preset.Icc,
                 IccFingerprint=appliedIccFingerprint};
             Data.Applied.RemoveAll(a=>a.DisplayKey==Selected.Key); Data.Applied.Add(record);
             try { Persist(); }
@@ -351,6 +356,7 @@ namespace Ncp
                 try {CleanupIccCopies();}
                 catch(Exception e) {throw new IOException("색상 적용은 완료했지만, 사용하지 않는 NCP ICC 사본을 정리하지 못했습니다.\n"+e.Message,e);}
             }
+            return applied.PanelSaveIssue;
         }
         void CleanupIccCopies()
         {

@@ -41,7 +41,7 @@ namespace Ncp
         public System.Collections.Generic.List<DisplayTarget> Enumerate() {return new System.Collections.Generic.List<DisplayTarget> {
             new DisplayTarget {Key="demo-monitor",GdiName=@"\\.\DISPLAY1",Name="DEMO DISPLAY",Primary=true}};}
         public DisplayReading Read(DisplayTarget d) {return new DisplayReading {Vibrance=current.Vibrance,Hue=current.Hue};}
-        public void Apply(DisplayTarget d,ColorValues v,double[] channels,ColorValues rollback,double[] rc) {current=v.Copy();}
+        public DisplayReading Apply(DisplayTarget d,ColorValues v,double[] channels,ColorValues rollback,double[] rc) {current=v.Copy();return Read(d);}
         public void Dispose() {}
     }
 }

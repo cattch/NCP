@@ -133,7 +133,7 @@ namespace Ncp
             internal TwoMonitors() {Targets=new List<DisplayTarget>{Main,Sub};}
             public List<DisplayTarget> Enumerate() {return Targets.ToList();}
             public DisplayReading Read(DisplayTarget d) {if(FailRead)throw new IOException("Read failure");return new DisplayReading {Vibrance=50,Hue=0};}
-            public void Apply(DisplayTarget d,ColorValues v,double[] c,ColorValues old,double[] oldChannels) {Writes++;}
+            public DisplayReading Apply(DisplayTarget d,ColorValues v,double[] c,ColorValues old,double[] oldChannels) {Writes++;return Read(d);}
             public void Dispose() { }
         }
     }

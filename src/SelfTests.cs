@@ -44,6 +44,7 @@ namespace Ncp
                 var rgb=NvidiaBackend.BuildRamp(new ColorValues(),new double[]{50,50,50,50,50,50,1,1.2,1.4});
                 Check(rgb[1500]<rgb[1501]&&rgb[1501]<rgb[1502],"preserve original per-channel gamma");
                 Reject(delegate{NvidiaBackend.BuildRamp(new ColorValues(),new double[8]);},"reject malformed RGB snapshot");
+                VerifyPanelGamma();
                 var backend=new FakeBackend();var store=new Store(Path.Combine(dir,"profile"));
                 var ctrl=new Controller(store,backend);ctrl.RefreshDisplays();
                 Check(backend.Writes==0,"startup performs no display writes");
@@ -58,7 +59,10 @@ namespace Ncp
                 Check(backend.Writes==0,"import performs no display writes");
                 Reject(delegate{ctrl.SavePreset(null,"경쟁 FPS",new ColorValues());},"duplicate name rejected");
                 ctrl.Refresh();Check(backend.Writes==0,"refresh performs no display writes");
+                string oldFingerprint=ctrl.Reading.Fingerprint;
                 ctrl.Apply(preset);Check(backend.Writes==1&&ctrl.AppliedInSession&&ctrl.LastApplied.PresetId==preset.Id,"only manual apply writes and records success");
+                Check(ctrl.HasReadableMatch && ctrl.LastApplied.PanelFingerprint!=oldFingerprint,
+                    "the applied marker records the new panel values instead of the previous fingerprint");
                 ctrl.Refresh();Check(backend.Writes==1,"read-only refresh after apply");
                 var reopened=new Controller(store,backend);reopened.RefreshDisplays();
                 Check(backend.Writes==1&&!reopened.AppliedInSession&&reopened.StatusTitle().StartsWith("마지막 적용"),"reopen does not reapply or pretend full readback");
@@ -84,6 +88,37 @@ namespace Ncp
             }catch(Exception e){exit=1;report.AppendLine(e.ToString());}
             report.AppendLine("RESULT: "+(exit==0?"PASS":"FAIL")+"; "+passed+" checks");
             File.WriteAllText(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"self-test.txt"),report.ToString(),Encoding.UTF8);return exit;
+        }
+        static void VerifyPanelGamma()
+        {
+            var raw=NvidiaPanelGamma.Encode(new ColorValues {Brightness=45,Contrast=60,Gamma=1.25},null);
+            Check(raw.SequenceEqual(new[]{98,98,98,104,104,104,125,125,125}),"panel persistence uses the driver's RGB value format");
+            var saved=new Dictionary<string,int> {
+                {NvidiaPanelGamma.Name(0),100},{NvidiaPanelGamma.RestoreFlag,0},{NvidiaPanelGamma.ReferenceMode,1},{"Unrelated",42}
+            };
+            var original=new Dictionary<string,int>(saved);
+            Func<string,int?> read=name=>saved.ContainsKey(name)?(int?)saved[name]:null;
+            Action<string,int?> write=(name,value)=> {
+                if(value.HasValue)saved[name]=value.Value;
+                else saved.Remove(name);
+            };
+            var update=new NvidiaPanelGamma(read,write,raw);
+            update.Save();
+            Check(update.Matches() && saved[NvidiaPanelGamma.RestoreFlag]==1 && saved["Unrelated"]==42
+                && saved[NvidiaPanelGamma.ReferenceMode]==1,"saving panel gamma sets the restore flag and preserves other settings");
+            Check(update.Restore() && saved.OrderBy(p=>p.Key).SequenceEqual(original.OrderBy(p=>p.Key)),
+                "rolling back restores earlier DWORDs and removes values added by the failed apply");
+            var partial=new NvidiaPanelGamma(read,(name,value)=> {
+                if(name==NvidiaPanelGamma.RestoreFlag && value==1)throw new IOException("simulated write failure");
+                write(name,value);
+            },raw);
+            Reject(partial.Save,"a write failure after the RGB values have been saved is reported");
+            Check(partial.Restore() && saved.OrderBy(p=>p.Key).SequenceEqual(original.OrderBy(p=>p.Key)),
+                "a partial write can be rolled back without leaving a saved curve behind");
+            var concurrent=new NvidiaPanelGamma(read,write,raw);
+            concurrent.Save();saved[NvidiaPanelGamma.Name(0)]=95;
+            Check(!concurrent.Restore() && saved[NvidiaPanelGamma.Name(0)]==95 && saved.Count==original.Count,
+                "rollback preserves an external change and restores the other saved values");
         }
         static void VerifyPresetOrder(string directory)
         {
@@ -130,9 +165,9 @@ namespace Ncp
         {
             public int Writes;public bool FailApply;public ColorValues Current=new ColorValues {Vibrance=75};public double[] LastChannels;
             public List<DisplayTarget> Enumerate(){return new List<DisplayTarget>{new DisplayTarget {Key="test-monitor",Name="Test",GdiName="DISPLAY1"}};}
-            public DisplayReading Read(DisplayTarget d){return new DisplayReading {Vibrance=Current.Vibrance,Hue=Current.Hue,Fingerprint="original",
+            public DisplayReading Read(DisplayTarget d){return new DisplayReading {Vibrance=Current.Vibrance,Hue=Current.Hue,Fingerprint=Current.Gamma.ToString("R",System.Globalization.CultureInfo.InvariantCulture),
                 PanelValues=new ColorValues {Gamma=1.1,Vibrance=75},Channels=new double[]{50,50,50,50,50,50,1.1,1.2,1.3}};}
-            public void Apply(DisplayTarget d,ColorValues v,double[] channels,ColorValues rollback,double[] rc){Writes++;if(FailApply)throw new InvalidOperationException("test failure");Current=v.Copy();LastChannels=channels;}
+            public DisplayReading Apply(DisplayTarget d,ColorValues v,double[] channels,ColorValues rollback,double[] rc){Writes++;if(FailApply)throw new InvalidOperationException("test failure");Current=v.Copy();LastChannels=channels;return Read(d);}
             public void Dispose(){}
         }
     }

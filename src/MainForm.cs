@@ -407,7 +407,7 @@ namespace Ncp
                 var saved=controller.SavePreset(asNew?null:selected.Id,title,EditorValues(),selectedIcc);
                 SelectPreset(saved);
                 if(!asNew) {
-                    try {controller.Apply(saved);}
+                    try {ShowApplyResult(controller.Apply(saved));}
                     catch(Exception e) {throw new InvalidOperationException("변경 내용은 저장되었습니다.\n"+e.Message,e);}
                 }
                 RebuildPresets();
@@ -421,7 +421,11 @@ namespace Ncp
         }
         void ApplyPreset(Preset preset)
         {
-            Run(delegate {controller.Apply(preset); SelectPreset(controller.LastAppliedPreset() ?? preset); RebuildPresets();});
+            Run(delegate {ShowApplyResult(controller.Apply(preset)); SelectPreset(controller.LastAppliedPreset() ?? preset); RebuildPresets();});
+        }
+        void ShowApplyResult(string panelIssue)
+        {
+            if(panelIssue!=null)ShowError("화면에 적용했습니다. " + panelIssue);
         }
         void Import()
         {
