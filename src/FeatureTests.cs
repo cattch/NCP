@@ -136,12 +136,12 @@ namespace Ncp
                 check(controller.Presets().Select(p=>p.Name).SequenceEqual(new[]{"기본값","맑음","안개 & 비","야간","범용"}),"bundled presets preserve the supplied order and include one neutral default");
                 var day=controller.Data.Presets.Single(p=>p.Name=="맑음");var fog=controller.Data.Presets.Single(p=>p.Name=="안개 & 비");var night=controller.Data.Presets.Single(p=>p.Name=="야간");var general=controller.Data.Presets.Single(p=>p.Name=="범용");
                 check(day.Values.Same(new ColorValues {Brightness=45,Contrast=70,Gamma=1.05,Vibrance=75})
-                    && fog.Values.Same(new ColorValues {Brightness=45,Contrast=60,Gamma=1.25,Vibrance=80})
+                    && fog.Values.Same(new ColorValues {Brightness=70,Contrast=100,Gamma=0.80,Vibrance=85})
                     && night.Values.Same(new ColorValues {Brightness=30,Contrast=70,Gamma=1.75,Vibrance=85})
                     && general.Values.Same(new ColorValues {Gamma=0.95,Vibrance=70}),"bundled presets contain their configured NVIDIA color values");
-                check(day.Icc.Hash==night.Icc.Hash && day.Icc.Name=="more_brighter.icc" && night.Icc.Name=="more_brighter.icc"
-                    && general.Icc.Hash==fog.Icc.Hash && fog.Icc.Name=="bright.icc" && general.Icc.Name=="bright.icc"
-                    && day.Icc.Hash!=fog.Icc.Hash,"bundled presets retain their supplied ICC associations");
+                check(day.Icc.Hash==night.Icc.Hash && day.Icc.Hash==fog.Icc.Hash
+                    && day.Icc.Name=="more_brighter.icc" && night.Icc.Name=="more_brighter.icc" && fog.Icc.Name=="more_brighter.icc"
+                    && general.Icc.Name=="bright.icc" && general.Icc.Hash!=day.Icc.Hash,"bundled presets retain their supplied ICC associations");
                 check(Directory.GetFiles(library.DirectoryPath).Length==2 && controller.Data.Presets.All(p=>IccLibrary.Hash(library.Read(p.Icc))==p.Icc.Hash),"first startup validates both ICC backups and stores the shared ICC only once beside settings");
                 check(color.Writes==0 && windows.Writes==0 && controller.Data.Applied.Count==0 && controller.Data.IccOriginals.Count==0,"initial profile creation never applies ICC or NVIDIA colors and records no pretend application");
                 controller.SavePreset(day.Id,"맑음 수정",new ColorValues {Gamma=1.2,Vibrance=65},day.Icc);
